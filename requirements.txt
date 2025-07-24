@@ -1,0 +1,4 @@
+uv
+google-adk
+python-dotenv
+praw
