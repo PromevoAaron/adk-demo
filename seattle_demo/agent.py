@@ -13,15 +13,27 @@ import google.auth
 load_dotenv()
 
 # Load credentials from your service account JSON file.
-try:
-    credentials, _ = google.auth.load_credentials_from_file(
-        "seattle_demo/promevoagentspacedemo-13db49e2f1d9.json"
-    )
-    credentials_config = BigQueryCredentialsConfig(credentials=credentials)
-    print("SA credentilized")
-except FileNotFoundError:
-    print("WARNING: Service account file not found. BigQuery tools will use Application Default Credentials if available.")
-    credentials_config = None
+cred_file = os.environ.get("SA_JSON_FILE") 
+
+# try if the file exists
+credentials_config = None
+if os.path.exists(cred_file):
+    try:
+        # Load file from current directory.
+        credentials, _ = google.auth.load_credentials_from_file(cred_file)
+        credentials_config = BigQueryCredentialsConfig(credentials=credentials)
+        print("SA credentilized from json file")
+    except Exception as e:
+        print(f"Error loading credentials from file: {e}")
+else:
+    print(f"WARNING: Service account file '{cred_file}' not found. BigQuery tools will use Application Default Credentials if available.")
+    try:
+        # If the file does not exist, use Application Default Credentials
+        credentials, _ = google.auth.default()
+        credentials_config = BigQueryCredentialsConfig(credentials=credentials)
+        print("SA credentialized from Application Default Credentials")
+    except Exception as e:
+        print(f"Error loading Application Default Credentials: {e}")
 
 # Define a tool configuration to block any write operations
 tool_config = BigQueryToolConfig(write_mode=WriteMode.ALLOWED)
@@ -33,18 +45,17 @@ bigquery_toolset = BigQueryToolset(
 )
 
 # Maybe  these should be lists
-def get_subreddit_list(search_term: str) -> dict:
+def get_top_subreddit_posts(search_term: str) -> dict:
     """
-        Searches for subreddits that match the search term and returns a dictionary
-        of subreddit names and their subscriber counts.
+        Searches for posts related to the search term.
 
         Args:
             search_term: The term to search for.
 
         Returns:
-            A dictionary where keys are the display names of the subreddits
-            and values are their subscriber counts.
+            A dictionary where each article is posted The most important item is the subreddit.
         """
+    print(f"Searching for subreddits with term: {search_term}")
     try:
         # Initialize the Reddit instance with credentials from environment variables
         reddit = praw.Reddit(
@@ -57,27 +68,22 @@ def get_subreddit_list(search_term: str) -> dict:
         # Search for subreddits matching the search term
         results = reddit.subreddits.search(search_term)
         
-        print("what did you find", subreddits)
-
-        # Filter where 'vegas' appears in the public description
-        filtered_subs = {
-            sub.display_name: sub.subscribers
-            for sub in results
-            if search_term.lower() in sub.public_description.lower()
-        }
-
-        # Sort and get top 5
-        top_5 = dict(sorted(filtered_subs.items(), key=lambda x: x[1], reverse=True)[:5])
-
-        
-        # return only top 5
-        return top_5
+        for submission in reddit.subreddit("all").search(search_term, sort="relevance", time_filter="month", limit=10):
+            # if the submission is SFW, save it
+            if submission.over_18 == False:
+                subreddits[submission.id] = {
+                    "subreddit": submission.subreddit.display_name,
+                    "title": submission.title,
+                    # "score": submission.score,
+                    # "comments": submission.num_comments,
+                }
+        return subreddits
 
     except Exception as e:
         print(f"An error occurred: {e}")
         return {}
 
-def get_top_posts(subreddit: str) -> dict:
+def get_relevant_posts(subreddit: str) -> dict:
         # Initialize the Reddit instance with credentials from environment variables
         reddit = praw.Reddit(
             client_id=os.environ.get("REDDIT_CLIENT_ID"),
@@ -111,9 +117,9 @@ def order_status(order_id: str) -> dict:
 reddit_agent = Agent(
     name="reddit_agent",
     model=os.environ.get("GOOGLE_GENAI_MODEL"),
-    description="Gets reddit stuff.",
-    tools=[get_subreddit_list, get_top_posts],
-    instruction="Look up subs",
+    description="This agent is designed to query the Reddit API using the custom functions listed in the tools list below.",
+    tools=[get_relevant_posts, get_top_subreddit_posts],
+    instruction="If a dictionary is returned, format it nicely (tabular if applicable). The user will need this information to do research on Reddit.",
     output_key="reddit_response"
 )
 
@@ -137,6 +143,8 @@ bigquery_agent = Agent(
         promevoagentspacedemo.demo_dataset
 
         If the user asks for order status info, use the order_summary_view
+        If the user ask for a part list, you may need to join vendors and vendor parts to provide relevant information.
+        If the user wants to create/add/submit/enter an order, add the required data to the orders table.
         
         Very Important: 
         When you execute a SQL please cast all results to string.
@@ -152,9 +160,18 @@ root_agent = Agent(
     ),
     instruction=(
         """\
-        You are a the base agent. Route the user question to the appropriate agent. If the user askes about reddit or subreddits, use the reddit_agent. "
-        If the user asks about sales, vendors, or any other data questions, use bigquery_agent. 
-        Otherwise, ask the user to stick on the demo topic. You can break the 4th wall here and be funny :)
+        You are the Seattle ADK Demo agent!
+
+        [Goal]
+        Route traffic to the appropriate subagents.
+
+        [Instructions]
+        Follow the steps.
+        1. Introduce yourself as the "Seattle ADK Demo Agent".
+        2. Ask how you can help the user.
+        3. If the user asks about reddit or subreddits, use the reddit_agent.
+        4. If the user asks about sales, vendors, or any other data questions, use the bigquery_agent.  
+        5. Otherwise, use your LLM training to attempt the question, but then quickly steer the agent back to the topic of the demo. 
         """
     ),
     output_key="root_response",

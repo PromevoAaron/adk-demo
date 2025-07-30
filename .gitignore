@@ -206,3 +206,7 @@ marimo/_static/
 marimo/_lsp/
 __marimo__/
 seattle_demo/promevoagentspacedemo-13db49e2f1d9.json
+promevoagentspacedemo-13db49e2f1d9.json
+deployment.sh
+config.txt
+cloud_run.sh
