@@ -35,4 +35,4 @@ Then run this: python as_registry_client.py --config config.json
 To allow agents to work with BigQuery, you need to give permissions to the AI Platform Reasoning Engine Service Agent. You can find that specific service account in the IAM table. 
 To read data, the typical roles needed are BigQuery Data Viewer and BigQuery Job User. 
 
-The Discovery Engine Service Agent service account also needs AI Platform permissions to 
+The Discovery Engine Service Agent service account also needs AI Platform permissions to AI Platform to see the agent's code.
